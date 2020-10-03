@@ -30,7 +30,7 @@
  * arduino-lmic/project_config/lmic_project_config.h or from your BOARDS.txt.
  *
  *******************************************************************************/
-// #include <Arduino.h>
+
 #include <lmic.h>
 #include <hal/hal.h>
 #include <SPI.h>
@@ -87,8 +87,6 @@ void printHex2(unsigned v) {
         Serial.print('0');
     Serial.print(v, HEX);
 }
-
-// void do_send(osjob_t* j);
 
 void onEvent (ev_t ev) {
     Serial.print(os_getTime());
