@@ -2,38 +2,65 @@
  * Copyright (c) 2015 Thomas Telkamp and Matthijs Kooijman
  * Copyright (c) 2018 Terry Moore, MCCI
  *
- * Permission is hereby granted, free of charge, to anyone
- * obtaining a copy of this document and accompanying files,
- * to do whatever they want with them without any restriction,
- * including, but not limited to, copying, modification and redistribution.
- * NO WARRANTY OF ANY KIND IS PROVIDED.
- *
- * This example sends a valid LoRaWAN packet with payload "Hello,
- * world!", using frequency and encryption settings matching those of
- * the The Things Network.
- *
- * This uses OTAA (Over-the-air activation), where where a DevEUI and
- * application key is configured, which are used in an over-the-air
- * activation procedure where a DevAddr and session keys are
- * assigned/generated for use with all further communication.
- *
- * Note: LoRaWAN per sub-band duty-cycle limitation is enforced (1% in
- * g1, 0.1% in g2), but not the TTN fair usage policy (which is probably
- * violated by this sketch when left running for longer)!
-
- * To use this sketch, first register your application and device with
- * the things network, to set or generate an AppEUI, DevEUI and AppKey.
- * Multiple devices can use the same AppEUI, but each device has its own
- * DevEUI and AppKey.
- *
- * Do not forget to define the radio type correctly in
- * arduino-lmic/project_config/lmic_project_config.h or from your BOARDS.txt.
- *
- *******************************************************************************/
+ * modified by Daniel Bates to include TinyGPS+ 
+ */
 
 #include <lmic.h>
 #include <hal/hal.h>
 #include <SPI.h>
+
+#include <TinyGPS++.h>
+// #include <SoftwareSerial.h>
+
+// static const int RXPin = 16, TXPin = 17;
+static const uint32_t GPSBaud = 9600;
+// The TinyGPS++ object
+TinyGPSPlus gps;
+// The serial connection to the GPS device
+// SoftwareSerial ss(RXPin, TXPin);
+
+
+/* 
+  From http://aprs.gids.nl/nmea/:
+   
+  $GPGSV
+  
+  GPS Satellites in view
+  
+  eg. $GPGSV,3,1,11,03,03,111,00,04,15,270,00,06,01,010,00,13,06,292,00*74
+      $GPGSV,3,2,11,14,25,170,00,16,57,208,39,18,67,296,40,19,40,246,00*74
+      $GPGSV,3,3,11,22,42,067,42,24,14,311,43,27,05,244,00,,,,*4D
+
+  1    = Total number of messages of this type in this cycle
+  2    = Message number
+  3    = Total number of SVs in view
+  4    = SV PRN number
+  5    = Elevation in degrees, 90 maximum
+  6    = Azimuth, degrees from true north, 000 to 359
+  7    = SNR, 00-99 dB (null when not tracking)
+  8-11 = Information about second SV, same as field 4-7
+  12-15= Information about third SV, same as field 4-7
+  16-19= Information about fourth SV, same as field 4-7
+*/
+
+// static const int MAX_SATELLITES = 40;
+
+// TinyGPSCustom totalGPGSVMessages(gps, "GPGSV", 1); // $GPGSV sentence, first element
+// TinyGPSCustom messageNumber(gps, "GPGSV", 2);      // $GPGSV sentence, second element
+// TinyGPSCustom satsInView(gps, "GPGSV", 3);         // $GPGSV sentence, third element
+// TinyGPSCustom satNumber[4]; // to be initialized later
+// TinyGPSCustom elevation[4];
+// TinyGPSCustom azimuth[4];
+// TinyGPSCustom snr[4];
+
+// struct
+// {
+//   bool active;
+//   int elevation;
+//   int azimuth;
+//   int snr;
+// } sats[MAX_SATELLITES];
+
 
 //
 // For normal use, we require that you edit the sketch to replace FILLMEIN
@@ -64,7 +91,7 @@ void os_getDevEui (u1_t* buf) { memcpy_P(buf, DEVEUI, 8);}
 // number but a block of memory, endianness does not really apply). In
 // practice, a key taken from ttnctl can be copied as-is.
 static const u1_t PROGMEM APPKEY[16] = { 0xB1, 0x55, 0x3A, 0x32, 0x45, 0xE3, 0xD0, 0xDE, 0x2B, 0xB0, 0x4E, 0x07, 0x48, 0x05, 0x40, 0xA3 };
-void os_getDevKey (u1_t* buf) {  memcpy_P(buf, APPKEY, 16);}
+void os_getDevKey (u1_t* buf) { memcpy_P(buf, APPKEY, 16); }
 
 static uint8_t mydata[] = "Hello, world!";
 static osjob_t sendjob;
@@ -75,7 +102,7 @@ const unsigned TX_INTERVAL = 60;
 
 // Pin mapping
 const lmic_pinmap lmic_pins = {
-    .nss = 18,
+    .nss = 5,
     .rxtx = LMIC_UNUSED_PIN,
     .rst = 14,
     .dio = {26, 33, LMIC_UNUSED_PIN}  // Pins for the Heltec ESP32 Lora board/ TTGO Lora32 with 3D metal antenna
@@ -222,29 +249,196 @@ void do_send(osjob_t* j){
 }
 
 void setup() {
-    Serial.begin(9600);
-    Serial.println(F("Starting"));
+    delay(2000);
+    Serial.begin(115200);
+    Serial2.begin(GPSBaud);
+    Serial.println(F("Starting LoRa"));
+    
+    
 
-    #ifdef VCC_ENABLE
-    // For Pinoccio Scout boards
-    pinMode(VCC_ENABLE, OUTPUT);
-    digitalWrite(VCC_ENABLE, HIGH);
-    delay(1000);
-    #endif
+    // #ifdef VCC_ENABLE
+    // // For Pinoccio Scout boards
+    // pinMode(VCC_ENABLE, OUTPUT);
+    // digitalWrite(VCC_ENABLE, HIGH);
+    // delay(1000);
+    // #endif
 
     // LMIC init
     os_init();
     // Reset the MAC state. Session and pending data transfers will be discarded.
     LMIC_reset();
-
     // Start job (sending automatically starts OTAA too)
     do_send(&sendjob);
+    
+    // Serial.print(F("Testing TinyGPS++ library v. ")); Serial.println(TinyGPSPlus::libraryVersion());
+    // // Initialize all the uninitialized TinyGPSCustom objects
+    // for (int i=0; i<4; ++i)
+    // {
+    //     satNumber[i].begin(gps, "GPGSV", 4 + 4 * i); // offsets 4, 8, 12, 16
+    //     elevation[i].begin(gps, "GPGSV", 5 + 4 * i); // offsets 5, 9, 13, 17
+    //     azimuth[i].begin(  gps, "GPGSV", 6 + 4 * i); // offsets 6, 10, 14, 18
+    //     snr[i].begin(      gps, "GPGSV", 7 + 4 * i); // offsets 7, 11, 15, 19
+    // }
+
+    
+    
 }
+
+int i_am_alive_Interval = 1000;
+long currentMillis;
+long previousMillis;
 
 void loop() {
-    os_runloop_once();
+    // LoRa below
+    os_runloop_once(); 
+    // This sketch displays information every time a new sentence is correctly encoded.
+    // LoRa end
+
+    unsigned long currentMillis = millis();
+ 
+    if(currentMillis - previousMillis > i_am_alive_Interval) {
+        previousMillis = currentMillis;   
+
+        Serial.println("Ping!");
+
+        // blink LED
+        if (digitalRead(2) == true)
+        {
+            digitalWrite(2, false);
+        }
+        else 
+        {
+            digitalWrite(2, true);
+        }
+    }
+
+    // // GPS below
+    // while (Serial2.available() > 0) {
+    //     // if (gps.encode(Serial2.read()))
+    //     // displayInfo();
+    //     Serial.print(char(Serial2.read()));
+    // }
+
+    // if (millis() > 5000 && gps.charsProcessed() < 10)
+    // {
+    //     Serial.println(F("No GPS detected: check wiring."));
+    //     // while(true);
+    // }
+    // GPS end
+
+//   // Dispatch incoming characters
+//   if (Serial2.available() > 0)
+//   {
+//     gps.encode(Serial2.read());
+//     if (totalGPGSVMessages.isUpdated())
+//     {
+//       for (int i=0; i<4; ++i)
+//       {
+//         int no = atoi(satNumber[i].value());
+//         // Serial.print(F("SatNumber is ")); Serial.println(no);
+//         if (no >= 1 && no <= MAX_SATELLITES)
+//         {
+//           sats[no-1].elevation = atoi(elevation[i].value());
+//           sats[no-1].azimuth = atoi(azimuth[i].value());
+//           sats[no-1].snr = atoi(snr[i].value());
+//           sats[no-1].active = true;
+//         }
+//       }
+      
+//       int totalMessages = atoi(totalGPGSVMessages.value());
+//       int currentMessage = atoi(messageNumber.value());
+//       if (totalMessages == currentMessage)
+//       {
+//         Serial.print(F("Sats=")); Serial.print(gps.satellites.value());
+//         Serial.print(F(" Nums="));
+//         for (int i=0; i<MAX_SATELLITES; ++i)
+//           if (sats[i].active)
+//           {
+//             Serial.print(i+1);
+//             Serial.print(F(" "));
+//           }
+//         Serial.print(F(" Elevation="));
+//         for (int i=0; i<MAX_SATELLITES; ++i)
+//           if (sats[i].active)
+//           {
+//             Serial.print(sats[i].elevation);
+//             Serial.print(F(" "));
+//           }
+//         Serial.print(F(" Azimuth="));
+//         for (int i=0; i<MAX_SATELLITES; ++i)
+//           if (sats[i].active)
+//           {
+//             Serial.print(sats[i].azimuth);
+//             Serial.print(F(" "));
+//           }
+        
+//         Serial.print(F(" SNR="));
+//         for (int i=0; i<MAX_SATELLITES; ++i)
+//           if (sats[i].active)
+//           {
+//             Serial.print(sats[i].snr);
+//             Serial.print(F(" "));
+//           }
+//         Serial.println();
+
+//         for (int i=0; i<MAX_SATELLITES; ++i)
+//           sats[i].active = false;
+//       }
+//     }
+//   }
+
+
+// }
+
+// void displayInfo()
+// {
+//   Serial.print(F("Location: ")); 
+//   if (gps.location.isValid())
+//   {
+//     Serial.print(gps.location.lat(), 6);
+//     Serial.print(F(","));
+//     Serial.print(gps.location.lng(), 6);
+//   }
+//   else
+//   {
+//     Serial.print(F("INVALID"));
+//   }
+
+//   Serial.print(F("  Date/Time: "));
+//   if (gps.date.isValid())
+//   {
+//     Serial.print(gps.date.month());
+//     Serial.print(F("/"));
+//     Serial.print(gps.date.day());
+//     Serial.print(F("/"));
+//     Serial.print(gps.date.year());
+//   }
+//   else
+//   {
+//     Serial.print(F("INVALID"));
+//   }
+
+//   Serial.print(F(" "));
+//   if (gps.time.isValid())
+//   {
+//     if (gps.time.hour() < 10) Serial.print(F("0"));
+//     Serial.print(gps.time.hour());
+//     Serial.print(F(":"));
+//     if (gps.time.minute() < 10) Serial.print(F("0"));
+//     Serial.print(gps.time.minute());
+//     Serial.print(F(":"));
+//     if (gps.time.second() < 10) Serial.print(F("0"));
+//     Serial.print(gps.time.second());
+//     Serial.print(F("."));
+//     if (gps.time.centisecond() < 10) Serial.print(F("0"));
+//     Serial.print(gps.time.centisecond());
+//   }
+//   else
+//   {
+//     Serial.print(F("INVALID"));
+//   }
+
+//   Serial.println();
 }
-
-
 
 
