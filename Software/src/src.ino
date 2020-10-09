@@ -2,102 +2,51 @@
  * Copyright (c) 2015 Thomas Telkamp and Matthijs Kooijman
  * Copyright (c) 2018 Terry Moore, MCCI
  *
- * modified by Daniel Bates to include TinyGPS+ 
+ * modified by Daniel Bates to include TinyGPS+, and more! 
  */
 
 #include <lmic.h>
 #include <hal/hal.h>
 #include <SPI.h>
-
 #include <TinyGPS++.h>
-// #include <SoftwareSerial.h>
 
-// static const int RXPin = 16, TXPin = 17;
+
+#define uS_TO_S_FACTOR 1000000  //Conversion factor for micro seconds to seconds
+#define TIME_TO_SLEEP  20        //Time ESP32 will go to sleep (in seconds)
+RTC_DATA_ATTR int bootCount = 0;
+touch_pad_t touchPin;
+
 static const uint32_t GPSBaud = 9600;
-// The TinyGPS++ object
+
 TinyGPSPlus gps;
-// The serial connection to the GPS device
-// SoftwareSerial ss(RXPin, TXPin);
 
+int i_am_alive_Interval = 1000;
+long currentMillis;
+long previousMillis;
 
-/* 
-  From http://aprs.gids.nl/nmea/:
-   
-  $GPGSV
-  
-  GPS Satellites in view
-  
-  eg. $GPGSV,3,1,11,03,03,111,00,04,15,270,00,06,01,010,00,13,06,292,00*74
-      $GPGSV,3,2,11,14,25,170,00,16,57,208,39,18,67,296,40,19,40,246,00*74
-      $GPGSV,3,3,11,22,42,067,42,24,14,311,43,27,05,244,00,,,,*4D
+// #ifdef COMPILE_REGRESSION_TEST
+// # define FILLMEIN 0
+// #else
+// # warning "You must replace the values marked FILLMEIN with real values from the TTN control panel!"
+// # define FILLMEIN (#dont edit this, edit the lines that use FILLMEIN)
+// #endif
 
-  1    = Total number of messages of this type in this cycle
-  2    = Message number
-  3    = Total number of SVs in view
-  4    = SV PRN number
-  5    = Elevation in degrees, 90 maximum
-  6    = Azimuth, degrees from true north, 000 to 359
-  7    = SNR, 00-99 dB (null when not tracking)
-  8-11 = Information about second SV, same as field 4-7
-  12-15= Information about third SV, same as field 4-7
-  16-19= Information about fourth SV, same as field 4-7
-*/
-
-// static const int MAX_SATELLITES = 40;
-
-// TinyGPSCustom totalGPGSVMessages(gps, "GPGSV", 1); // $GPGSV sentence, first element
-// TinyGPSCustom messageNumber(gps, "GPGSV", 2);      // $GPGSV sentence, second element
-// TinyGPSCustom satsInView(gps, "GPGSV", 3);         // $GPGSV sentence, third element
-// TinyGPSCustom satNumber[4]; // to be initialized later
-// TinyGPSCustom elevation[4];
-// TinyGPSCustom azimuth[4];
-// TinyGPSCustom snr[4];
-
-// struct
-// {
-//   bool active;
-//   int elevation;
-//   int azimuth;
-//   int snr;
-// } sats[MAX_SATELLITES];
-
-
-//
-// For normal use, we require that you edit the sketch to replace FILLMEIN
-// with values assigned by the TTN console. However, for regression tests,
-// we want to be able to compile these scripts. The regression tests define
-// COMPILE_REGRESSION_TEST, and in that case we define FILLMEIN to a non-
-// working but innocuous value.
-//
-#ifdef COMPILE_REGRESSION_TEST
-# define FILLMEIN 0
-#else
-# warning "You must replace the values marked FILLMEIN with real values from the TTN control panel!"
-# define FILLMEIN (#dont edit this, edit the lines that use FILLMEIN)
-#endif
-
-// This EUI must be in little-endian format, so least-significant-byte
-// first. When copying an EUI from ttnctl output, this means to reverse
-// the bytes. For TTN issued EUIs the last bytes should be 0xD5, 0xB3,
-// 0x70.
+// This EUI must be in little-endian format.
 static const u1_t PROGMEM APPEUI[8]={ 0x8C, 0x51, 0x03, 0xD0, 0x7E, 0xD5, 0xB3, 0x70 };
 void os_getArtEui (u1_t* buf) { memcpy_P(buf, APPEUI, 8);}
 
-// This should also be in little endian format, see above.
+// This should also be in little endian format.
 static const u1_t PROGMEM DEVEUI[8]={ 0xFB, 0x20, 0xA6, 0x00, 0xAA, 0x66, 0x7C, 0x00 };
 void os_getDevEui (u1_t* buf) { memcpy_P(buf, DEVEUI, 8);}
 
-// This key should be in big endian format (or, since it is not really a
-// number but a block of memory, endianness does not really apply). In
-// practice, a key taken from ttnctl can be copied as-is.
+// This key should be in big endian format.
 static const u1_t PROGMEM APPKEY[16] = { 0xB1, 0x55, 0x3A, 0x32, 0x45, 0xE3, 0xD0, 0xDE, 0x2B, 0xB0, 0x4E, 0x07, 0x48, 0x05, 0x40, 0xA3 };
 void os_getDevKey (u1_t* buf) { memcpy_P(buf, APPKEY, 16); }
 
-static uint8_t mydata[] = "Hello, world!";
+static uint8_t mydata[] = "Wedi Baglu Rhywun!";
 static osjob_t sendjob;
 
-// Schedule TX every this many seconds (might become longer due to duty
-// cycle limitations).
+// duty cycle for testing.
 const unsigned TX_INTERVAL = 60;
 
 // Pin mapping
@@ -105,7 +54,7 @@ const lmic_pinmap lmic_pins = {
     .nss = 5,
     .rxtx = LMIC_UNUSED_PIN,
     .rst = 14,
-    .dio = {26, 33, LMIC_UNUSED_PIN}  // Pins for the Heltec ESP32 Lora board/ TTGO Lora32 with 3D metal antenna
+    .dio = {26, 33, LMIC_UNUSED_PIN}
 };
 
 void printHex2(unsigned v) {
@@ -163,7 +112,7 @@ void onEvent (ev_t ev) {
             }
             // Disable link check validation (automatically enabled
             // during join, but because slow data rates change max TX
-	    // size, we don't use it in this example.
+            // size, we don't use it in this example.
             LMIC_setLinkCheckMode(0);
             break;
         /*
@@ -236,7 +185,7 @@ void onEvent (ev_t ev) {
     }
 }
 
-void do_send(osjob_t* j){
+void do_send(osjob_t* j) {
     // Check if there is not a current TX/RX job running
     if (LMIC.opmode & OP_TXRXPEND) {
         Serial.println(F("OP_TXRXPEND, not sending"));
@@ -249,49 +198,41 @@ void do_send(osjob_t* j){
 }
 
 void setup() {
-    delay(2000);
     Serial.begin(115200);
-    Serial2.begin(GPSBaud);
+    delay(2000);
+    
+    // ++bootCount;
+    // Serial.println("Boot number: " + String(bootCount));
+
+    //Print the wakeup reason for ESP32    
+    // print_wakeup_reason();
+
     Serial.println(F("Starting LoRa"));
-    
-    
-
-    // #ifdef VCC_ENABLE
-    // // For Pinoccio Scout boards
-    // pinMode(VCC_ENABLE, OUTPUT);
-    // digitalWrite(VCC_ENABLE, HIGH);
-    // delay(1000);
-    // #endif
-
-    // LMIC init
     os_init();
-    // Reset the MAC state. Session and pending data transfers will be discarded.
     LMIC_reset();
     // Start job (sending automatically starts OTAA too)
     do_send(&sendjob);
     
-    // Serial.print(F("Testing TinyGPS++ library v. ")); Serial.println(TinyGPSPlus::libraryVersion());
-    // // Initialize all the uninitialized TinyGPSCustom objects
-    // for (int i=0; i<4; ++i)
-    // {
-    //     satNumber[i].begin(gps, "GPGSV", 4 + 4 * i); // offsets 4, 8, 12, 16
-    //     elevation[i].begin(gps, "GPGSV", 5 + 4 * i); // offsets 5, 9, 13, 17
-    //     azimuth[i].begin(  gps, "GPGSV", 6 + 4 * i); // offsets 6, 10, 14, 18
-    //     snr[i].begin(      gps, "GPGSV", 7 + 4 * i); // offsets 7, 11, 15, 19
-    // }
+    
+    Serial2.begin(GPSBaud);
+    Serial.println(F("Starting GPS"));
 
-    
-    
+    // Set timer to 5 seconds
+	// esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+	// Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) +
+	// " Seconds");
+
+	// //Go to sleep now
+	// esp_deep_sleep_start();
+
+
 }
 
-int i_am_alive_Interval = 1000;
-long currentMillis;
-long previousMillis;
-
 void loop() {
+    
     // LoRa below
-    os_runloop_once(); 
     // This sketch displays information every time a new sentence is correctly encoded.
+    // os_runloop_once();
     // LoRa end
 
     unsigned long currentMillis = millis();
@@ -299,146 +240,112 @@ void loop() {
     if(currentMillis - previousMillis > i_am_alive_Interval) {
         previousMillis = currentMillis;   
 
-        Serial.println("Ping!");
+        // Serial.println("Ping!");
 
-        // blink LED
-        if (digitalRead(2) == true)
-        {
-            digitalWrite(2, false);
-        }
-        else 
-        {
-            digitalWrite(2, true);
-        }
+        // // blink LED
+        // if (digitalRead(2) == true)
+        // {
+        //     digitalWrite(2, false);
+        // }
+        // else 
+        // {
+        //     digitalWrite(2, true);
+        // }
     }
 
-    // // GPS below
-    // while (Serial2.available() > 0) {
-    //     // if (gps.encode(Serial2.read()))
-    //     // displayInfo();
-    //     Serial.print(char(Serial2.read()));
-    // }
+    // GPS below
+    while (Serial2.available() > 0) {
+        if (gps.encode(Serial2.read()))
+        displayInfo();
+        // Serial.print(char(Serial2.read())); // debug
+    }
 
-    // if (millis() > 5000 && gps.charsProcessed() < 10)
-    // {
-    //     Serial.println(F("No GPS detected: check wiring."));
-    //     // while(true);
-    // }
+    if (millis() > 5000 && gps.charsProcessed() < 10)
+    {
+        Serial.println(F("No GPS detected: check wiring."));
+        // while(true);
+    }
     // GPS end
-
-//   // Dispatch incoming characters
-//   if (Serial2.available() > 0)
-//   {
-//     gps.encode(Serial2.read());
-//     if (totalGPGSVMessages.isUpdated())
-//     {
-//       for (int i=0; i<4; ++i)
-//       {
-//         int no = atoi(satNumber[i].value());
-//         // Serial.print(F("SatNumber is ")); Serial.println(no);
-//         if (no >= 1 && no <= MAX_SATELLITES)
-//         {
-//           sats[no-1].elevation = atoi(elevation[i].value());
-//           sats[no-1].azimuth = atoi(azimuth[i].value());
-//           sats[no-1].snr = atoi(snr[i].value());
-//           sats[no-1].active = true;
-//         }
-//       }
-      
-//       int totalMessages = atoi(totalGPGSVMessages.value());
-//       int currentMessage = atoi(messageNumber.value());
-//       if (totalMessages == currentMessage)
-//       {
-//         Serial.print(F("Sats=")); Serial.print(gps.satellites.value());
-//         Serial.print(F(" Nums="));
-//         for (int i=0; i<MAX_SATELLITES; ++i)
-//           if (sats[i].active)
-//           {
-//             Serial.print(i+1);
-//             Serial.print(F(" "));
-//           }
-//         Serial.print(F(" Elevation="));
-//         for (int i=0; i<MAX_SATELLITES; ++i)
-//           if (sats[i].active)
-//           {
-//             Serial.print(sats[i].elevation);
-//             Serial.print(F(" "));
-//           }
-//         Serial.print(F(" Azimuth="));
-//         for (int i=0; i<MAX_SATELLITES; ++i)
-//           if (sats[i].active)
-//           {
-//             Serial.print(sats[i].azimuth);
-//             Serial.print(F(" "));
-//           }
-        
-//         Serial.print(F(" SNR="));
-//         for (int i=0; i<MAX_SATELLITES; ++i)
-//           if (sats[i].active)
-//           {
-//             Serial.print(sats[i].snr);
-//             Serial.print(F(" "));
-//           }
-//         Serial.println();
-
-//         for (int i=0; i<MAX_SATELLITES; ++i)
-//           sats[i].active = false;
-//       }
-//     }
-//   }
-
-
-// }
-
-// void displayInfo()
-// {
-//   Serial.print(F("Location: ")); 
-//   if (gps.location.isValid())
-//   {
-//     Serial.print(gps.location.lat(), 6);
-//     Serial.print(F(","));
-//     Serial.print(gps.location.lng(), 6);
-//   }
-//   else
-//   {
-//     Serial.print(F("INVALID"));
-//   }
-
-//   Serial.print(F("  Date/Time: "));
-//   if (gps.date.isValid())
-//   {
-//     Serial.print(gps.date.month());
-//     Serial.print(F("/"));
-//     Serial.print(gps.date.day());
-//     Serial.print(F("/"));
-//     Serial.print(gps.date.year());
-//   }
-//   else
-//   {
-//     Serial.print(F("INVALID"));
-//   }
-
-//   Serial.print(F(" "));
-//   if (gps.time.isValid())
-//   {
-//     if (gps.time.hour() < 10) Serial.print(F("0"));
-//     Serial.print(gps.time.hour());
-//     Serial.print(F(":"));
-//     if (gps.time.minute() < 10) Serial.print(F("0"));
-//     Serial.print(gps.time.minute());
-//     Serial.print(F(":"));
-//     if (gps.time.second() < 10) Serial.print(F("0"));
-//     Serial.print(gps.time.second());
-//     Serial.print(F("."));
-//     if (gps.time.centisecond() < 10) Serial.print(F("0"));
-//     Serial.print(gps.time.centisecond());
-//   }
-//   else
-//   {
-//     Serial.print(F("INVALID"));
-//   }
-
-//   Serial.println();
+    
 }
 
 
+void displayInfo()
+{
+  Serial.print(F("Location: ")); 
+  if (gps.location.isValid())
+  {
+    Serial.print(gps.location.lat(), 6);
+    Serial.print(F(","));
+    Serial.print(gps.location.lng(), 6);
+  }
+  else
+  {
+    Serial.print(F("INVALID"));
+  }
+
+  Serial.print(F("  Date/Time: "));
+  if (gps.date.isValid())
+  {
+    Serial.print(gps.date.month());
+    Serial.print(F("/"));
+    Serial.print(gps.date.day());
+    Serial.print(F("/"));
+    Serial.print(gps.date.year());
+  }
+  else
+  {
+    Serial.print(F("INVALID"));
+  }
+
+  Serial.print(F(" "));
+  if (gps.time.isValid())
+  {
+    if (gps.time.hour() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.hour());
+    Serial.print(F(":"));
+    if (gps.time.minute() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.minute());
+    Serial.print(F(":"));
+    if (gps.time.second() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.second());
+    Serial.print(F("."));
+    if (gps.time.centisecond() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.centisecond());
+  }
+  else
+  {
+    Serial.print(F("INVALID"));
+  }
+
+  Serial.println();
+}
+
+void print_wakeup_reason(){
+	esp_sleep_source_t wakeup_reason;
+	wakeup_reason = esp_sleep_get_wakeup_cause();
+    Serial.println(wakeup_reason);
+	switch(wakeup_reason)
+	{
+		case ESP_SLEEP_WAKEUP_UNDEFINED  : Serial.println("ESP_SLEEP_WAKEUP_UNDEFINED"); break;
+        case ESP_SLEEP_WAKEUP_ALL  : Serial.println("ESP_SLEEP_WAKEUP_ALL"); break;
+        case ESP_SLEEP_WAKEUP_EXT0  : Serial.println("ESP_SLEEP_WAKEUP_EXT0"); break;
+        case ESP_SLEEP_WAKEUP_EXT1  : Serial.println("ESP_SLEEP_WAKEUP_EXT1"); break;
+		case ESP_SLEEP_WAKEUP_TIMER  : Serial.println("Wakeup caused by timer"); break;
+		case ESP_SLEEP_WAKEUP_TOUCHPAD  : Serial.println("Wakeup caused by touchpad"); break;
+		case ESP_SLEEP_WAKEUP_ULP  : Serial.println("Wakeup caused by ULP program"); break;
+        case ESP_SLEEP_WAKEUP_GPIO  : Serial.println("ESP_SLEEP_WAKEUP_GPIO"); break;
+        case ESP_SLEEP_WAKEUP_UART  : Serial.println("ESP_SLEEP_WAKEUP_UART"); break;
+		default : Serial.println("Wakeup was not caused by deep sleep"); break;
+	}
+}
+
+// ESP_SLEEP_WAKEUP_UNDEFINED,    //!< In case of deep sleep, reset was not caused by exit from deep sleep
+//     ESP_SLEEP_WAKEUP_ALL,          //!< Not a wakeup cause, used to disable all wakeup sources with esp_sleep_disable_wakeup_source
+//     ESP_SLEEP_WAKEUP_EXT0,         //!< Wakeup caused by external signal using RTC_IO
+//     ESP_SLEEP_WAKEUP_EXT1,         //!< Wakeup caused by external signal using RTC_CNTL
+//     ESP_SLEEP_WAKEUP_TIMER,        //!< Wakeup caused by timer
+//     ESP_SLEEP_WAKEUP_TOUCHPAD,     //!< Wakeup caused by touchpad
+//     ESP_SLEEP_WAKEUP_ULP,          //!< Wakeup caused by ULP program
+//     ESP_SLEEP_WAKEUP_GPIO,         //!< Wakeup caused by GPIO (light sleep only)
+//     ESP_SLEEP_WAKEUP_UART,         //!< Wake
