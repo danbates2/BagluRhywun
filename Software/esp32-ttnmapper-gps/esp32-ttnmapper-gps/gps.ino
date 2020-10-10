@@ -8,24 +8,24 @@
 
 
 #include <TinyGPS++.h>
-#include <HardwareSerial.h> 
+//#include <HardwareSerial.h> 
 
-#define RXPin 34
-#define TXPin 35
+//#define RXPin 34
+//#define TXPin 35
 #define GPSBaud 9600
 
 TinyGPSPlus gps;
-HardwareSerial ss(1);
+//HardwareSerial ss(1);
 
 void gps_setup(){
-  ss.begin(GPSBaud, SERIAL_8N1, RXPin, TXPin);
+  Serial2.begin(GPSBaud);
   Serial.print(F("TinyGPS++ library v. ")); Serial.println(TinyGPSPlus::libraryVersion());
   Serial.println();
 }
 
 void gps_loop(){
-  while (ss.available() > 0) {
-    gps.encode(ss.read());
+  while (Serial2.available() > 0) {
+    gps.encode(Serial2.read());
   }
   if (runEvery_gps(5000)) 
   {

@@ -9,9 +9,9 @@
 // Create a integration with ttnmapper
 //----------------------------------------//
 
-const char *devAddr = "00000000";
-const char *nwkSKey = "00000000000000000000000000000000";
-const char *appSKey = "00000000000000000000000000000000";
+const char *devAddr = "2601166C";
+const char *nwkSKey = "80B6305911606EDFD9AEE101717F0054";
+const char *appSKey = "FB8B328050A6B39D2F8B87E3D0539239";
 
 //----------------------------------------//
 
@@ -32,10 +32,10 @@ static uint8_t APPSKEY[16];
 
 // Pin mapping
 const lmic_pinmap lmic_pins = {
-  .nss = 18, 
+  .nss = 5, 
   .rxtx = LMIC_UNUSED_PIN,
   .rst = 14,
-  .dio = {/*dio0*/ 26, /*dio1*/ 33, /*dio2*/ 32}
+  .dio = {/*dio0*/ 26, /*dio1*/ 33, /*dio2*/ LMIC_UNUSED_PIN}
 };
 
 void os_getArtEui (u1_t* buf) { }
@@ -49,7 +49,7 @@ void onEvent (ev_t ev) {
   Serial.print(": ");
   switch (ev) {
     case EV_TXCOMPLETE:
-      oled_status(" --- TXCOMPLETE --- ");
+//      oled_status(" --- TXCOMPLETE --- ");
       Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
       if (LMIC.txrxFlags & TXRX_ACK) 
       {
@@ -66,7 +66,7 @@ void onEvent (ev_t ev) {
       os_setTimedCallback(&sendjob, os_getTime() + sec2osticks(SEND_TIMER), do_send);
       break;
     case EV_TXSTART:
-      oled_status(" --- TXSTART --- ");
+//      oled_status(" --- TXSTART --- ");
       Serial.println(F("EV_TXSTART"));
       break;
   }
@@ -87,7 +87,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println(F("Starting"));
   
-  oled_setup();
+//  oled_setup();
   gps_setup();
   button_setup();
   
@@ -103,7 +103,7 @@ void setup() {
   LMIC_setSession (0x13, LORA_DEVADDR(DEVADDR), NWKSKEY, APPSKEY);
   LMIC_setAdrMode(0);
   LMIC_setClockError(MAX_CLOCK_ERROR * 10 / 100);
-  LMIC_selectSubBand(1);
+//  LMIC_selectSubBand(1);
   LMIC_setLinkCheckMode(0);
 
   do_send(&sendjob);
@@ -112,10 +112,10 @@ void setup() {
 void loop() {
   os_runloop_once();
   gps_loop();
-  oled_loop();
+//  oled_loop();
   if (button_loop())
   {
-    oled_mode(button_mode());
+//    oled_mode(button_mode());
     
     if (button_count() == 0)
       do_send(&sendjob);
@@ -133,7 +133,7 @@ void message(const uint8_t *payload, size_t size, uint8_t port)
   Serial.println("Received " + String(size) + " bytes on port " + String(port) + ":");
   if (port == 0) 
   {
-    oled_status(" --- TX_CONFIRMED --- ");
+//    oled_status(" --- TX_CONFIRMED --- ");
     return;
   }
   if (size == 0) return;
