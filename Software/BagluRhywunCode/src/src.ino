@@ -78,15 +78,15 @@ void setup() {
     Serial.begin(115200);
     delay(2000);
     pinMode(15, INPUT);
-    while(1) {
-        Serial.println(digitalRead(15));
-        delay(100);
-    }
+    // while(1) {
+    //     Serial.println(digitalRead(15));
+    //     delay(100);
+    // }
     // ++bootCount;
     // Serial.println("Boot number: " + String(bootCount));
 
     //Print the wakeup reason for ESP32    
-    // print_wakeup_reason();
+    print_wakeup_reason();
 
     // Serial.println(F("Starting LoRa"));
     // os_init();
@@ -98,10 +98,10 @@ void setup() {
     // Serial2.begin(GPSBaud);
     // Serial.println(F("Starting GPS"));
 
-    // // Set sleep timer to TIME_TO_SLEEP seconds
-	// // esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-	// // Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) +
-	// // " Seconds");
+    // Set sleep timer to TIME_TO_SLEEP seconds
+	esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+	Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) +
+	" Seconds");
 
     // // wake up on GPIO15 Interrupt going low.
     // esp_sleep_enable_ext0_wakeup(GPIO_NUM_15,0);
@@ -109,7 +109,7 @@ void setup() {
 
 
 	// // //Go to sleep now
-	// esp_deep_sleep_start();
+	esp_deep_sleep_start();
 
 
 }
