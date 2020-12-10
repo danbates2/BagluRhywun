@@ -100,7 +100,6 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  // HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);
 
   /* USER CODE END 2 */
 
@@ -108,22 +107,23 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    debug_printf("I have been awoken..\r\n");
-        /* Disable WKUP pin */
-    PWR->CSR &= PWR_CSR_EWUP1; 
-    /* Clear Wake-up flag */
-    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
-    /* Clear StandBy flag */
-    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
-    
-    /* enable WKUP pin */
-    PWR->CSR |= PWR_CSR_EWUP1; 
-
-    debug_printf("Got here too..\r\n");
-    HAL_Delay(1000);
-    
-    /* Enter standby mode */
-    HAL_PWR_EnterSTANDBYMode();
+    HAL_GPIO_TogglePin(SW_RFM_GPIO_Port, SW_RFM_Pin);
+    HAL_GPIO_TogglePin(SW_GPS_GPIO_Port, SW_GPS_Pin);
+    HAL_Delay(20000);
+    // HAL_Delay(20);
+    // debug_printf("I have been awoken..\r\n");
+    // /* Disable WKUP pin */
+    // PWR->CSR &= PWR_CSR_EWUP1; 
+    // /* Clear Wake-up flag */
+    // __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+    // /* Clear StandBy flag */
+    // __HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
+    // /* enable WKUP pin */
+    // PWR->CSR |= PWR_CSR_EWUP1; 
+    // debug_printf("Got here too..\r\n");
+    // HAL_Delay(1000);
+    // /* Enter standby mode */
+    // HAL_PWR_EnterSTANDBYMode();
     
     
 

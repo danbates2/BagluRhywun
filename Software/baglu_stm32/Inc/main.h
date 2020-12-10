@@ -49,12 +49,16 @@
 
 /* Private define ------------------------------------------------------------*/
 
-#define RFM_IRQ_Pin GPIO_PIN_1
-#define RFM_IRQ_GPIO_Port GPIOB
-#define GPIO_OUT_GPS_Pin GPIO_PIN_4
-#define GPIO_OUT_GPS_GPIO_Port GPIOB
-#define GPIO_OUT_RFM_Pin GPIO_PIN_5
-#define GPIO_OUT_RFM_GPIO_Port GPIOB
+#define RFM_DIO1_Pin GPIO_PIN_0
+#define RFM_DIO1_GPIO_Port GPIOF
+#define SW_RFM_Pin GPIO_PIN_1
+#define SW_RFM_GPIO_Port GPIOF
+#define RFM_CS_Pin GPIO_PIN_4
+#define RFM_CS_GPIO_Port GPIOA
+#define RFM_DIO0_Pin GPIO_PIN_1
+#define RFM_DIO0_GPIO_Port GPIOB
+#define SW_GPS_Pin GPIO_PIN_8
+#define SW_GPS_GPIO_Port GPIOA
 
 /* ########################## Assert Selection ############################## */
 /**
