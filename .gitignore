@@ -6,3 +6,4 @@
 .vscode/extensions.json
 *.DS_Store
 Software/baglu_stm32/build/*
+Software/baglu_stm32L432k/build/*
