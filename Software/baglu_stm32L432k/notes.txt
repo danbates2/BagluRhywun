@@ -1,0 +1,2 @@
+. SB9 has been desoldered for ext powersupply.
+
