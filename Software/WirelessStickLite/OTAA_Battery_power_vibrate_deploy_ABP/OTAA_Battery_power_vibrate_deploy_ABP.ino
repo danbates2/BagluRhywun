@@ -33,7 +33,7 @@
 #include <TinyGPS++.h> // gps library for neo-6mv2 module.
 #include <TimeLib.h> // 'system time' library.
 
-// #define DELOYING // this elongates the timers to the long enough times for battery saving. uncomment for testing and quicker turnovers of timing events.
+#define DEPLOYING // this elongates the timers to the long enough times for battery saving. uncomment for testing and quicker turnovers of timing events.
 // https://console.thethingsnetwork.org/applications/horsesforcourses/devices/danshorsetest
 
 // ABP mode!
@@ -110,6 +110,7 @@ LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
 // ready for sending bool
 //----------------------------------------
 bool dataisValidAndForSending = false;
+bool firstBootSender = true;
 
 //--------------------
 // sleep variables
@@ -153,10 +154,10 @@ typedef struct {
   float longStore = 0.1;
   float latStore = 0.1;
   float battVoltage = 0.1;
-} locationRecord; // init'd with test data
+} locationRecord_t; // init'd with test data
 
-RTC_DATA_ATTR locationRecord locRecord;
-locationRecord loraPacketStore;
+RTC_DATA_ATTR locationRecord_t locRecord;
+locationRecord_t loraPacketStore;
 
 
 
@@ -230,7 +231,7 @@ void setup()
     if (gps.hdop.hdop() > 10) { //!gps.date.isValid() || !gps.location.isValid()
       Serial.println("gps not valid");
       pinMode(GPSPin, OUTPUT);
-      digitalWrite(GPSPin, LOW); // switched to LOW for testing only! // make sure gps is turned on?
+      digitalWrite(GPSPin, HIGH);// make sure gps is turned on?
       appTxDutyCycle = SLEEP_TIMER1MIN; Serial.println("Setting sleep timer to 1 minutes");
     }
     else { // we have valid data. So send packet and go to sleep.
@@ -348,14 +349,14 @@ void setup()
 
 // https://stackoverflow.com/questions/484357/trying-to-copy-struct-members-to-byte-array-in-c
 // Transfer data from our struct to the LoRa packet, the packet is called appData. appDataSize must also be defined.
-static void bring_data_together(int _appDataSize) {
+static void bring_data_together(locationRecord_t) {
   Serial.print("packing data into LoRa packet : ");
   uint8_t *bytePtr = (uint8_t*)&loraPacketStore;
   appDataSize = sizeof(loraPacketStore) ;
 
   // appData MAX length is 128 bytes.
 
-  for (int i = 0; i < sizeof(locRecord); i++) {
+  for (int i = 0; i < sizeof(locationRecord_t); i++) {
     appData[i] = *bytePtr;
     bytePtr++;
     Serial.print(appData[i], HEX);
@@ -394,12 +395,23 @@ void loop()
           DEVICE_STATE_SLEEP_BOOL = false;
         }
 
+        if (firstBootSender) {
+          // clear flag
+          firstBootSender = false;
+          
+          // bring gps and battery data together into LoRa packet.
+          bring_data_together(loraPacketStore);
+          
+          // send packet.
+          LoRaWAN.send(loraWanClass);
+        }
+
         if (dataisValidAndForSending) {
           // clear flag
           dataisValidAndForSending = false;
 
           // bring gps and battery data together into LoRa packet.
-          bring_data_together(sizeof(loraPacketStore));
+          bring_data_together(loraPacketStore);
 
           // send packet.
           LoRaWAN.send(loraWanClass);
