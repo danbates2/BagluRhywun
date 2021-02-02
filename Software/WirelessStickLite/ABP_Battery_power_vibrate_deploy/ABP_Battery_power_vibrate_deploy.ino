@@ -33,7 +33,7 @@
 #include <TinyGPS++.h> // gps library for neo-6mv2 module.
 #include <TimeLib.h> // 'system time' library.
 
-#define DEPLOYING // this elongates the timers to the long enough times for battery saving. uncomment for testing and quicker turnovers of timing events.
+//#define DEPLOYING // this elongates the timers to the long enough times for battery saving. uncomment for testing and quicker turnovers of timing events.
 // https://console.thethingsnetwork.org/applications/horsesforcourses/devices/danshorsetest
 
 // ABP mode!
@@ -110,7 +110,7 @@ LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
 // ready for sending bool
 //----------------------------------------
 bool dataisValidAndForSending = false;
-bool firstBootSender = true;
+RTC_DATA_ATTR bool firstBootSender = true;
 
 //--------------------
 // sleep variables
@@ -124,12 +124,12 @@ bool firstBootSender = true;
 #define SLEEP_TIMER3MIN mS_TO_S_FACTOR * 60*3        /* Time ESP32 will go to sleep (in seconds) */
 #define SLEEP_TIMER15MIN mS_TO_S_FACTOR * 60*15        /* Time ESP32 will go to sleep (in seconds) */
 #else
-#define SLEEP_TIMER1MIN mS_TO_S_FACTOR * 15  // seconds      /* Time ESP32 will go to sleep (in seconds) */
-#define SLEEP_TIMER3MIN mS_TO_S_FACTOR * 30        /* Time ESP32 will go to sleep (in seconds) */
-#define SLEEP_TIMER15MIN mS_TO_S_FACTOR * 60        /* Time ESP32 will go to sleep (in seconds) */
+#define SLEEP_TIMER1MIN mS_TO_S_FACTOR * 15  // seconds
+#define SLEEP_TIMER3MIN mS_TO_S_FACTOR * 30
+#define SLEEP_TIMER15MIN mS_TO_S_FACTOR * 60
 #endif
 #define UINT32MAX 2^32
-bool DEVICE_STATE_SLEEP_BOOL = false;
+bool DEVICE_STATE_SLEEP_BOOL = false; // for debugging and avoiding repetative SLEEP state print outs.
 
 //--------------------
 // gps variables
@@ -138,7 +138,7 @@ bool DEVICE_STATE_SLEEP_BOOL = false;
 #define GPSPin 4
 TinyGPSPlus gps; // create TinyGPS+ object
 static const double ASTRAL_LAT = 53.145310, ASTRAL_LON = -4.115818;
-double distanceRadiusKm = 0.000;
+float distanceRadiusKm = 0.020;
 
 
 //------------------------------------------------------------
@@ -150,14 +150,14 @@ RTC_DATA_ATTR bool firstBoot = true; // this is to know whether we're 'initialis
 RTC_DATA_ATTR bool awokenByVibration = false; // yet another flag
 RTC_DATA_ATTR time_t tMem = 0;
 typedef struct {
-  uint32_t hdopStore = 101;
+  float hdopStore = 101.0;
   float longStore = 0.1;
   float latStore = 0.1;
   float battVoltage = 0.1;
 } locationRecord_t; // init'd with test data
 
 RTC_DATA_ATTR locationRecord_t locRecord;
-locationRecord_t loraPacketStore;
+RTC_DATA_ATTR locationRecord_t loraPacketStore;
 
 
 
@@ -174,7 +174,7 @@ void setup()
   // have to put Vext LOW on this one.
   Serial.begin(115200);
   while (!Serial);
-  Serial.println("OTAA to Deploy");
+  Serial.println("ABP to Deploy");
   Serial.print("Program LoRaWAN packet size : "); Serial.println(sizeof(locRecord));
   Serial1.begin(GPSBaud); // open GPS module serial port.
 
@@ -200,11 +200,6 @@ void setup()
   digitalWrite(Vext, HIGH);
 
 
-  // tinyGPS++ library example print.
-  Serial.println();
-  Serial.println(F("Sats HDOP  Latitude   Longitude   Fix  Date       Time     Date Alt    Course Speed Card  Distance Course Card  Chars Sentences Checksum"));
-  Serial.println(F("           (deg)      (deg)       Age                      Age  (m)    --- from GPS ----  ---- to London  ----  RX    RX        Fail"));
-  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------"));
 
 
 
@@ -228,7 +223,7 @@ void setup()
     Serial.println("(wakeup_reason_store == 4 && firstBoot == true)");
     smartDelay(1000); // ensure we have fresh data input from the GPS module.
     gpsDebug();
-    if (gps.hdop.hdop() > 10) { //!gps.date.isValid() || !gps.location.isValid()
+    if (gps.hdop.hdop() > 10.0 || gps.hdop.hdop() < 0.1) { //!gps.date.isValid() || !gps.location.isValid()
       Serial.println("gps not valid");
       pinMode(GPSPin, OUTPUT);
       digitalWrite(GPSPin, HIGH);// make sure gps is turned on?
@@ -237,8 +232,11 @@ void setup()
     else { // we have valid data. So send packet and go to sleep.
       firstBoot = false;
       setTime(gps.time.hour(), gps.time.minute(), gps.time.second(), gps.date.day(), gps.date.month(), gps.date.year()); // update system time.
+      delay(2);
       rtc_data_updater(); // update rtc memory data with fresh gps and battery data.
+      delay(2);
       lora_packet_preparer(); // copy gps and battery data to a struct for sending over LoRaWAN.
+      delay(2);
 
       // tidy up.
       pinMode(GPSPin, OUTPUT);
@@ -256,9 +254,9 @@ void setup()
     awokenByVibration = true; // AWOKEN BY VIBRATION!!!
     pinMode(GPSPin, OUTPUT);
     digitalWrite(GPSPin, HIGH); Serial.println("gps turned on"); // turn on GPS.
-    smartDelay(1000); // ensure we have fresh data input from the GPS module.
+    delay(5000); smartDelay(1000); // ensure we have fresh data input from the GPS module.
     gpsDebug();
-    if (gps.hdop.hdop() > 10) {
+    if (gps.hdop.hdop() > 10.0 || gps.hdop.hdop() < 0.1) {
       Serial.println("gps not valid");
       // go to sleep on timer.
       appTxDutyCycle = SLEEP_TIMER1MIN; Serial.println("Setting sleep timer to 1 minutes");
@@ -288,13 +286,30 @@ void setup()
 
 
   //--------------------------------------------------------------------------------------------------------------
+  // if awoken by the internal timer AFTER first boot,
+  // outside of an "awokenByVibration" cycle...
+  // should be after a long sleep... waking ONLY to activate the vibration sensor wake interrupt.
+  //--------------------------------------------------------------------------------------------------------------
+  if (wakeup_reason_store == 4 && firstBoot == false && awokenByVibration == false) {
+    Serial.println("(wakeup_reason_store == 4 && firstBoot == false && awokenByVibration == false)");
+    pinMode(GPSPin, OUTPUT);
+    digitalWrite(GPSPin, LOW); Serial.println("gps turned off"); // make sure GPS turned off.
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 0); Serial.println("vibration trig. activated"); // 1 = wake on High, 0 = wake on Low
+    appTxDutyCycle = UINT32MAX; Serial.println("Setting sleep timer to UINT32MAX");
+
+    // pre_sleep();
+    //    sleep_now();
+  }
+
+
+  //--------------------------------------------------------------------------------------------------------------
   // if awoken by the internal timer AFTER first boot, within a "awokenByVibration" cycle.
   //--------------------------------------------------------------------------------------------------------------
   if (wakeup_reason_store == 4 && firstBoot == false && awokenByVibration == true) {
     Serial.println("(wakeup_reason_store == 4 && firstBoot == false && awokenByVibration == true)");
     smartDelay(1000); // ensure we have fresh data string from the GPS module.
     gpsDebug();
-    if (gps.hdop.hdop() > 10) {
+    if (gps.hdop.hdop() > 10.0 || gps.hdop.hdop() < 0.1) {
       Serial.println("gps not valid");
       pinMode(GPSPin, OUTPUT);
       digitalWrite(GPSPin, HIGH); Serial.println("gps turned on");
@@ -323,21 +338,7 @@ void setup()
   }
 
 
-  //--------------------------------------------------------------------------------------------------------------
-  // if awoken by the internal timer AFTER first boot,
-  // outside of an "awokenByVibration" cycle...
-  // should be after a long sleep... waking ONLY to activate the vibration sensor wake interrupt.
-  //--------------------------------------------------------------------------------------------------------------
-  if (wakeup_reason_store == 4 && firstBoot == false && awokenByVibration == false) {
-    Serial.println("(wakeup_reason_store == 4 && firstBoot == false && awokenByVibration == false)");
-    pinMode(GPSPin, OUTPUT);
-    digitalWrite(GPSPin, LOW); Serial.println("gps turned off"); // make sure GPS turned off.
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 0); Serial.println("vibration trig. activated"); // 1 = wake on High, 0 = wake on Low
-    appTxDutyCycle = UINT32MAX; Serial.println("Setting sleep timer to UINT32MAX");
 
-    // pre_sleep();
-    //    sleep_now();
-  }
 
 
 
@@ -347,22 +348,7 @@ void setup()
 }
 
 
-// https://stackoverflow.com/questions/484357/trying-to-copy-struct-members-to-byte-array-in-c
-// Transfer data from our struct to the LoRa packet, the packet is called appData. appDataSize must also be defined.
-static void bring_data_together(locationRecord_t) {
-  Serial.print("packing data into LoRa packet : ");
-  uint8_t *bytePtr = (uint8_t*)&loraPacketStore;
-  appDataSize = sizeof(loraPacketStore) ;
 
-  // appData MAX length is 128 bytes.
-
-  for (int i = 0; i < sizeof(locationRecord_t); i++) {
-    appData[i] = *bytePtr;
-    bytePtr++;
-    Serial.print(appData[i], HEX);
-  }
-  Serial.println();
-}
 
 
 // The loop function is called in an endless loop
@@ -396,12 +382,14 @@ void loop()
         }
 
         if (firstBootSender) {
+          Serial.println("first Boot sending");
+
           // clear flag
           firstBootSender = false;
-          
+
           // bring gps and battery data together into LoRa packet.
-          bring_data_together(loraPacketStore);
-          
+          bring_data_together();
+
           // send packet.
           LoRaWAN.send(loraWanClass);
         }
@@ -411,7 +399,8 @@ void loop()
           dataisValidAndForSending = false;
 
           // bring gps and battery data together into LoRa packet.
-          bring_data_together(loraPacketStore);
+          bring_data_together();
+          delay(2);
 
           // send packet.
           LoRaWAN.send(loraWanClass);
@@ -436,7 +425,7 @@ void loop()
       }
     case DEVICE_STATE_SLEEP:
       {
-        if (!DEVICE_STATE_SLEEP_BOOL) {
+        if (!DEVICE_STATE_SLEEP_BOOL) { // for debugging and avoiding SLEEP state print outs.
           DEVICE_STATE_SLEEP_BOOL = true;
           Serial.println("DEVICE_STATE_SLEEP");
         }
@@ -498,47 +487,6 @@ double distanceResult(double lat_now, double lng_now, double lat_previous, doubl
   Serial.println(distanceKm);
   return distanceKm;
 }
-
-void send_LoRa() {
-  delay(30);
-  //  Heltec.begin(false /*DisplayEnable Enable*/, true /*LoRa Disable*/, true /*Serial Enable*/, false /*PABOOST Enable*/, BAND /*long BAND*/);
-  Serial.println("this send_LoRa() code needs doing");
-}
-
-
-/*
-    Now that we have setup a wake cause and if needed setup the
-    peripherals state in deep sleep, we can now start going to
-    deep sleep.
-    In the case that no wake up sources were provided but deep
-    sleep was started, it will sleep forever unless hardware
-    reset occurs.
-*/
-
-
-void pre_sleep() {
-  Mcu.writeRegister(0x01, 0x80 | 0x00); // experimental, by DB.
-  SPI.end();
-  pinMode(5, INPUT);
-  pinMode(14, INPUT);
-  pinMode(15, INPUT);
-  pinMode(16, INPUT);
-  pinMode(17, INPUT);
-  pinMode(18, INPUT);
-  pinMode(19, INPUT);
-  pinMode(26, INPUT);
-  pinMode(27, INPUT);
-  digitalWrite(Vext, HIGH);
-  delay(2);
-}
-
-void sleep_now() {
-  Serial.println("Going to sleep now");
-  delay(2);
-  esp_deep_sleep_start();
-  Serial.println("This will never be printed");
-}
-
 
 
 /*
@@ -679,6 +627,14 @@ void debugExit() {
 }
 
 void gpsDebug() {
+
+  // tinyGPS++ library example print.
+  Serial.println();
+  Serial.println(F("Sats HDOP  Latitude   Longitude   Fix  Date       Time     Date Alt    Course Speed Card  Distance Course Card  Chars Sentences Checksum"));
+  Serial.println(F("           (deg)      (deg)       Age                      Age  (m)    --- from GPS ----  ---- to London  ----  RX    RX        Fail"));
+  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------"));
+
+
   static const double LONDON_LAT = 51.508131, LONDON_LON = -0.128002;
 
   printInt(gps.satellites.value(), gps.satellites.isValid(), 5);
@@ -725,7 +681,7 @@ void gpsDebug() {
 
 }
 
-double get_batt_voltage() {
+float get_batt_voltage() {
   long batt_accumulator = 0;
   for (int i = 0; i < 10; i++) {
     batt_accumulator += analogRead(battADCPin);
@@ -735,21 +691,50 @@ double get_batt_voltage() {
   return result;
 }
 
+
+// https://stackoverflow.com/questions/484357/trying-to-copy-struct-members-to-byte-array-in-c
+// Transfer data from our struct to the LoRa packet, the packet is called appData. appDataSize must also be defined.
+void bring_data_together() {
+  Serial.println("loraPacketStore :");
+  Serial.print("packing data into LoRa packet : ");
+  uint8_t *bytePtr = (uint8_t*)&loraPacketStore;
+  appDataSize = sizeof(loraPacketStore) ;
+
+  // appData MAX length is 128 bytes.
+
+  for (int i = 0; i < sizeof(loraPacketStore); i++) {
+    appData[i] = *bytePtr;
+    bytePtr++;
+    Serial.print(appData[i], HEX);
+  }
+  Serial.println();
+}
+
 void lora_packet_preparer() {
-  loraPacketStore.hdopStore = gps.hdop.value();
-  loraPacketStore.longStore = gps.location.lng();
-  loraPacketStore.latStore = gps.location.lat();
+  Serial.println("lora_packet_preparer() : ");
+  
+  loraPacketStore.hdopStore = gps.hdop.hdop();
+  Serial.println(loraPacketStore.hdopStore);
+
+  loraPacketStore.latStore = (float)gps.location.lat();
+  Serial.println(loraPacketStore.latStore);
+  
+  loraPacketStore.longStore = (float)gps.location.lng();
+  Serial.println(loraPacketStore.longStore);
+  
   loraPacketStore.battVoltage = get_batt_voltage();
+  Serial.println(loraPacketStore.battVoltage);
 
   dataisValidAndForSending = true;
 }
 
 void rtc_data_updater() {
   // set the system time with the new gps time.
+  Serial.println("rtc_data_updater()"); 
   // update RTC memory time with new system time..
   tMem = now();
-  // save the new gps data.
-  locRecord.hdopStore = gps.hdop.value(); // update RTC memory GPS data.
+  // save the new gps and battery data.
+  locRecord.hdopStore = gps.hdop.hdop(); // update RTC memory GPS data.
   locRecord.longStore = gps.location.lng(); // update RTC memory GPS data.
   locRecord.latStore = gps.location.lat(); // update RTC memory GPS data.
   locRecord.battVoltage = get_batt_voltage();
